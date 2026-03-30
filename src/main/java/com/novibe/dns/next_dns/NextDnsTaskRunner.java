@@ -5,6 +5,7 @@ import com.novibe.common.data_sources.HostsBlockListsLoader;
 import com.novibe.common.data_sources.HostsOverrideListsLoader;
 import com.novibe.common.util.EnvParser;
 import com.novibe.common.util.Log;
+import com.novibe.common.util.DomainExclusionFilter;
 import com.novibe.dns.next_dns.http.dto.request.CreateRewriteDto;
 import com.novibe.dns.next_dns.service.NextDnsDenyService;
 import com.novibe.dns.next_dns.service.NextDnsRewriteService;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.novibe.common.config.EnvironmentVariables.BLOCK;
+import static com.novibe.common.config.EnvironmentVariables.EXCLUDE;
 import static com.novibe.common.config.EnvironmentVariables.REDIRECT;
 
 @Service
@@ -37,9 +39,17 @@ public class NextDnsTaskRunner implements DnsTaskRunner {
         NextDNS API rate limiter reset config: 60 seconds after the last request""");
 
         List<String> blockSources = EnvParser.parse(BLOCK);
+        List<String> excludedDomains = EnvParser.parse(EXCLUDE);
         if (!blockSources.isEmpty()) {
             Log.step("Obtain block lists from %s sources".formatted(blockSources.size()));
             List<String> blocks = blockListsLoader.fetchWebsites(blockSources);
+            if (!excludedDomains.isEmpty()) {
+                int beforeFiltering = blocks.size();
+                blocks = blocks.stream()
+                        .filter(domain -> !DomainExclusionFilter.isExcluded(domain, excludedDomains))
+                        .toList();
+                Log.common("Skipped %s blocked domains by EXCLUDE list".formatted(beforeFiltering - blocks.size()));
+            }
             Log.step("Prepare denylist");
             List<String> filteredBlocklist = nextDnsDenyService.dropExistingDenys(blocks);
             Log.common("Prepared %s domains to block".formatted(filteredBlocklist.size()));
@@ -54,6 +64,13 @@ public class NextDnsTaskRunner implements DnsTaskRunner {
 
             Log.step("Obtain rewrite lists from %s sources".formatted(rewriteSources.size()));
             List<HostsOverrideListsLoader.BypassRoute> overrides = overrideListsLoader.fetchWebsites(rewriteSources);
+            if (!excludedDomains.isEmpty()) {
+                int beforeFiltering = overrides.size();
+                overrides = overrides.stream()
+                        .filter(route -> !DomainExclusionFilter.isExcluded(route.website(), excludedDomains))
+                        .toList();
+                Log.common("Skipped %s rewrite domains by EXCLUDE list".formatted(beforeFiltering - overrides.size()));
+            }
 
             Log.step("Prepare rewrites");
             Map<String, CreateRewriteDto> requests = nextDnsRewriteService.buildNewRewrites(overrides);
