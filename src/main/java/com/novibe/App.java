@@ -12,7 +12,7 @@ public class App {
 
     public static ApplicationContext context;
 
-    static void main() {
+    public static void main(String[] args) {
         String provider = EnvironmentVariables.DNS.toUpperCase();
 
         String commonsBasePackage = "com.novibe.common";

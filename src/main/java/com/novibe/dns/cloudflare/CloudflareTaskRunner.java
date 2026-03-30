@@ -6,6 +6,7 @@ import com.novibe.common.data_sources.HostsOverrideListsLoader;
 import com.novibe.common.data_sources.HostsOverrideListsLoader.BypassRoute;
 import com.novibe.common.util.EnvParser;
 import com.novibe.common.util.Log;
+import com.novibe.common.util.DomainExclusionFilter;
 import com.novibe.dns.cloudflare.http.dto.response.list.GatewayListDto;
 import com.novibe.dns.cloudflare.http.dto.response.rule.GatewayRuleDto;
 import com.novibe.dns.cloudflare.service.ListService;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.novibe.common.config.EnvironmentVariables.BLOCK;
+import static com.novibe.common.config.EnvironmentVariables.EXCLUDE;
 import static com.novibe.common.config.EnvironmentVariables.REDIRECT;
 
 
@@ -38,8 +40,24 @@ public class CloudflareTaskRunner implements DnsTaskRunner {
         Script behaviour: previously generated data is always about to be removed.
         If you want to clear Cloudflare block/redirect settings, launch this script without providing sources in related environment variables.""");
 
+        List<String> excludedDomains = EnvParser.parse(EXCLUDE);
         List<String> blocks = blockListsLoader.fetchWebsites(EnvParser.parse(BLOCK));
+        if (!excludedDomains.isEmpty()) {
+            int beforeFiltering = blocks.size();
+            blocks = blocks.stream()
+                    .filter(domain -> !DomainExclusionFilter.isExcluded(domain, excludedDomains))
+                    .toList();
+            Log.common("Skipped %s blocked domains by EXCLUDE list".formatted(beforeFiltering - blocks.size()));
+        }
+
         List<BypassRoute> overrides = overrideListsLoader.fetchWebsites(EnvParser.parse(REDIRECT));
+        if (!excludedDomains.isEmpty()) {
+            int beforeFiltering = overrides.size();
+            overrides = overrides.stream()
+                    .filter(route -> !DomainExclusionFilter.isExcluded(route.website(), excludedDomains))
+                    .toList();
+            Log.common("Skipped %s override domains by EXCLUDE list".formatted(beforeFiltering - overrides.size()));
+        }
 
         Log.step("Remove old rules.");
         List<GatewayRuleDto> gatewayRuleDtos = ruleService.obtainExistingRules();
